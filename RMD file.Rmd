@@ -1,0 +1,268 @@
+---
+title: "Text Mining"
+author: "Tushar Mundodu"
+date: "December 16, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(warning = FALSE, message = F,echo = TRUE)
+```
+
+
+Sentiment analysis refers to the use of natural language processing, text analysis and computational linguistics to identify and extract subjective information in source materials. The approach used is to convert the raw data of reviews to terms, determine the sentiment scores using lexicons and using TF-IDF transformation to create a **DOCUMENT TERM MATRIX (DTM)**. 
+
+```{r cars, echo=FALSE, message=FALSE}
+library(tidytext)
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(wordcloud)
+library(ggplot2)
+library(SnowballC)
+```
+
+Importing the data
+```{r}
+tm_file<- read.csv("C:/Users/Tushar/Desktop/Courses/3rd SEM/IST 707/Ass4/deception_data_converted_final_clean.csv",header = T, stringsAsFactors = FALSE)
+str(tm_file)
+tm_file_df<- data.frame(tm_file)
+```
+
+
+#TOKENISATION
+
+Tokenization is the act of breaking up a sequence of strings into pieces such as words, keywords, phrases, symbols and other elements called tokens. In the process of tokenization, some characters like punctuation marks are discarded. The tokens become the input for another process like parsing and text mining.
+```{r}
+review_words <- tm_file_df %>% 
+  select(X, lie, sentiment, review) %>% 
+  unnest_tokens(word, review, to_lower = TRUE)
+head(review_words, 10)
+```
+
+
+
+#STEMMING & LEMMATIZATION
+
+The goal of both stemming and lemmatization is to reduce inflectional forms and sometimes derivationally related forms of a word to a common base form.
+*Stemming* usually refers to a crude heuristic process that chops off the ends of words in the hope of achieving this goal correctly most of the time, and often includes the removal of derivational affixes. *Lemmatization* usually refers to doing things properly with the use of a vocabulary and morphological analysis of words, normally aiming to remove inflectional endings only and to return the base or dictionary form of a word, which is known as the lemma . 
+
+*Example: If confronted with the token 'saw', stemming might return just 's', whereas lemmatization would attempt to return either 'see' or 'saw' depending on whether the use of the token was as a verb or a noun. The two may also differ in that stemming most commonly collapses derivationally related words, whereas lemmatization commonly only collapses the different inflectional forms of a lemma.* 
+
+```{r}
+review_words$word <- wordStem(review_words$word)
+```
+
+
+
+#STOP WORD REMOVAL
+
+Stop words are those that occur almost everywhere and do not significantly differentiate sentences.
+Example: articles, pronouns.
+```{r}
+set.seed(7474)
+cat(stop_words$word[sample(x = 1:nrow(stop_words), size = 50)], sep = ", ")
+```
+
+Source of stop words : Lexicons
+```{r}
+unique(stop_words$lexicon)
+```
+
+
+Removing stop words
+```{r}
+#Before removing stop words
+nrow(review_words)
+```
+
+
+After removing stop words
+```{r}
+review_words <- review_words %>% 
+  filter(!word %in% stop_words$word, 
+         str_detect(word, "^[a-z']+$"))
+
+#After removing stop words
+nrow(review_words)
+```
+
+
+Wordcloud of review words in the deception data
+```{r}
+review_words %>% 
+  count(word) %>% 
+  with(wordcloud(word,n,max.words = 500,colors=rainbow(12)))
+```
+
+
+Most frequent words in the reviews
+```{r}
+review_words %>% 
+  count(word) %>% 
+  with(wordcloud(word, n, min.freq = 5,max.words = 200,random.order=FALSE,colors=brewer.pal(8, "Dark2")))
+```
+
+
+Different sentiments
+```{r}
+unique(sentiments$sentiment)
+```
+
+
+Scoring text documents through lexicon : AFINN
+```{r}
+AFINN <- sentiments %>% 
+  filter(lexicon == 'AFINN') %>% 
+  select(word, af_score = score)
+
+head(AFINN,10)
+```
+
+
+Scores for lie (true/false)
+```{r}
+reviews_sentiment_l <- review_words %>% 
+  inner_join(AFINN, by = "word") %>% 
+    group_by(X,lie) %>% 
+  summarise(score_l = mean(af_score))
+
+tail(reviews_sentiment_l,5)
+head(reviews_sentiment_l,5)
+```
+
+
+Spread of sentiment score based on 'lie'
+t: lie
+f: truth
+```{r}
+ggplot(reviews_sentiment_l, aes(lie, score_l, group = lie)) +
+  geom_boxplot(fill="green", color="red")+theme_bw()
+```
+
+
+Scores for sentiment (positive/negative)
+```{r}
+reviews_sentiment_s <- review_words %>% 
+  inner_join(AFINN, by = "word") %>% 
+  group_by(X,sentiment) %>% 
+  summarise(score_s = mean(af_score))
+
+tail(reviews_sentiment_s,5)
+head(reviews_sentiment_s,5)
+```
+
+
+Spread of sentiment score based on 'sentiment'
+n: negative
+p: positive
+```{r}
+ggplot(reviews_sentiment_s, aes(sentiment, score_s, group = sentiment)) +
+  geom_boxplot(fill="orange", color="blue")+theme_bw()
+```
+
+
+#REVIEW SENTIMENT
+
+The deception data contains reviews which are either positive or negative. 
+
+**Positive** review words are either *true positive* words or *false negative* words, on the basis of columns 'lie' and 'sentiment'.
+
+**Negative** review words are either *true negative* words or *false positive* words, on the basis of columns 'lie' and 'sentiment'.
+
+
+Positive words classification
+```{r}
+tp_words<- review_words
+tp_words<- tp_words[tp_words$lie=='t',]
+tp_words<- tp_words[tp_words$sentiment=='p',]
+row.names(tp_words)<- NULL
+
+fn_words<- review_words
+fn_words<- fn_words[fn_words$lie=='f',]
+fn_words<- fn_words[fn_words$sentiment=='n',]
+row.names(fn_words)<- NULL
+
+tp_fn<- rbind.data.frame(tp_words,fn_words)
+```
+
+
+Negative words classification
+```{r}
+tn_words<- review_words
+tn_words<- tn_words[tn_words$lie=='t',]
+tn_words<- tn_words[tn_words$sentiment=='n',]
+row.names(tn_words)<- NULL
+
+fp_words<- review_words
+fp_words<- fp_words[fp_words$lie=='f',]
+fp_words<- fp_words[fp_words$sentiment=='p',]
+row.names(fp_words)<- NULL
+
+tn_fp<- rbind.data.frame(tn_words,fp_words)
+```
+
+
+Determining the 30 highest positive words
+```{r}
+summary_tpfn <- tp_fn %>%
+  count(X, word) %>% 
+  group_by(word) %>% summarise(count1=n())
+true_pos<- summary_tpfn %>% filter(count1>=2) %>% arrange(desc(count1))
+
+pos<- head(true_pos,30)
+```
+
+
+Determining the 30 highest negative words
+```{r}
+summary_tnfp <- tn_fp %>%
+  count(X, word) %>% 
+  group_by(word) %>% summarise(count2=n())
+true_neg<- summary_tnfp %>% filter(count2>=2) %>% arrange(desc(count2))
+
+neg<- head(true_neg,30)
+```
+
+
+
+Visualising the 30 highest count of positive and negative review words
+```{r pressure, echo=FALSE}
+ggplot(pos, aes(word, count1)) + geom_bar(stat = "identity", color="black", fill = "green") + xlab("Positive words") + ylab("Number of reviews") + theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5))
+
+ggplot(neg, aes(word, count2)) + geom_bar(stat = "identity", color="black", fill = "red") + xlab("Negative words") + ylab("Number of reviews") + theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5))
+```
+
+
+
+#DOCUMENT-TERM MATRIX (DTM)
+Each row represents one document (such as a book or article). Each column represents one term, and each value (typically) contains the number of appearances of that term in that document.
+
+```{r}
+review_words_dtm <- review_words %>% 
+  count(X, word) %>% 
+  bind_tf_idf(word, X, n) %>% 
+  select(X, word, tf_idf) %>% 
+  spread(key = word, value = tf_idf)
+```
+
+
+*Exporting the DTM to a csv file*
+```{r}
+#write.csv(review_words_dtm,file = "DocumentTermMatrix.csv",row.names = F)
+```
+
+
+The idea of tf-idf is to find the important words for the content of each document by decreasing the weight for commonly used words and increasing the weight for words that are not used very much in a collection or corpus of documents. This becomes necessary to further carry out machine learning algorithms after text mining.
+
+
+
+*Code inspired from weekly contents :Week 14*
+
+
+#REFERENCES:
+
+1. https://nlp.stanford.edu/IR-book/html/htmledition/stemming-and-lemmatization-1.html
+2. https://www.tidytextmining.com/tfidf.html
+3. https://blackboard.syracuse.edu/bbcswebdav/pid-5324033-dt-content-rid-40599951_1/courses/21974.1191/Week14_Text_Mining_with_Demo.html#5
